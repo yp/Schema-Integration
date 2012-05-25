@@ -73,6 +73,9 @@ parser.add_argument('-l', '--min-cardinality',
 parser.add_argument('-u', '--max-cardinality',
                     help="the maximum cardinality of each cluster",
                     type=positive_integer, required=True)
+parser.add_argument('-e', '--max-entities',
+                    help="the maximum number of entities in each cluster",
+                    type=positive_integer, required=True)
 parser.add_argument('-s', '--similarity-matrix',
                     help="the file where the computed schema similarity "
                     "matrix will be written to",
@@ -224,8 +227,10 @@ matrixminus = [ [ -el for el in mrow ] for mrow in matrix ]
 n = len(schema_names)
 ll = args['min_cardinality']
 lu = args['max_cardinality']
+eu = args['max_entities']
 
 logging.debug("Clusters must have at least %d and at most %d elements.", ll, lu)
+logging.debug("Clusters must have at most %d entitites.", eu)
 
 # Compute the number 'k' of clusters
 
@@ -280,7 +285,8 @@ def prepare_ILP_variables(k, n, ntot, matrixplus, matrixminus):
 
 
 def prepare_ILP_constraints(k, n, ntot, matrixplus, matrixminus,
-                            ll, lu,
+                            ll, lu, eu,
+                            no_of_entities,
                             variable_idx):
 
     def get_constr_coeff(variable_idx, *variables):
@@ -343,6 +349,15 @@ def prepare_ILP_constraints(k, n, ntot, matrixplus, matrixminus,
         constr_sense.append('G')
         constr_rhs.append(ll)
 
+    # Maximum number of entities
+    for c in xrange(k):
+        constr_mat.append( get_constr_coeff( variable_idx,
+                                             *[ (no_of_entities[i], (VarType.Y, (i, c)))
+                                                for i in xrange(n) ]) )
+        constr_sense.append('L')
+        constr_rhs.append(eu)
+
+
     return (constr_mat, constr_sense, constr_rhs)
 
 
@@ -360,7 +375,8 @@ logging.debug("The program has %d variables.", N_VARS)
 logging.debug("Computing the set of constraints...")
 
 (constr_mat, constr_sense, constr_rhs) = prepare_ILP_constraints(k, n, ntot, matrixplus, matrixminus,
-                                                                 ll, lu,
+                                                                 ll, lu, eu,
+                                                                 [ len(se) for se in schema_entities ],
                                                                  variable_idx)
 
 logging.debug("The program has %d constraints.", len(constr_mat))
@@ -405,8 +421,8 @@ logging.debug("Solving method: %s.", cplex.Cplex.solution.method[c.solution.get_
 
 if c.solution.get_status() in INFEASIBLE:
     logging.warn("!! No clusterization that satisfies the cardinality constraints is possible !!")
-    logging.warn("Given: Min cluster cardinality=%d, Max cluster cardinality=%d",
-                 ll, lu)
+    logging.warn("Given: Min cluster cardinality=%d, Max cluster cardinality=%d, Max no of entities=%d",
+                 ll, lu, eu)
 
 if c.solution.get_status() in OPTIMAL:
     logging.info("Optimum found! -- The objective value is %f.",
