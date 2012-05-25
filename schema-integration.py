@@ -1,5 +1,31 @@
 #!/usr/bin/env python
 
+##########
+#
+#                          SCHEMA-INTEGRATION
+#  A clustering approach to guide DB schema integration processes
+#
+#  Copyright (C) 2012  Yuri Pirola, Riccardo Dondi
+#
+#  Distributed under the terms of the GNU General Public License (GPL)
+#
+#
+#  This program is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+##########
+
+
 from __future__ import print_function
 
 import argparse
@@ -101,6 +127,10 @@ logging.basicConfig(level=log_level,
 
 
 logging.info("Schema integration via clustering")
+logging.info("Copyright (C) 2012 Yuri Pirola, Riccardo Dondi")
+logging.info("This program is distributed under the terms of the GNU General Public License (GPL), v3 or later.")
+logging.info("This program comes with ABSOLUTELY NO WARRANTY. See the GNU General Public License for more details.")
+logging.info("This is free software, and you are welcome to redistribute it under the conditions specified by the license.")
 
 infile = args["input-file"]
 outfile = args["output-file"]
