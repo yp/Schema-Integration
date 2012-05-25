@@ -116,6 +116,9 @@ for line in infile:
         header = None
         continue
 
+    # Strip empty cells
+    line = [ cell for cell in line if cell ]
+
     if next_is_header:
         # The first cell must be "SCHEMAi VS SCHEMAj"
         header = line[0].strip('"')
@@ -156,8 +159,15 @@ for line in infile:
         current_weights.append([ float(x) for x in line[1:] if x ])
 
 logging.info("Read %d schemas.", len(schema_names))
-schema_names = list(schema_names)
+maxsnlen = max(( len(sn) for sn in schema_names))
+for sn in schema_names:
+    logging.info("  - schema: '%s',%s  %3d entities",
+                 sn, ' ' * (maxsnlen-len(sn)), len(schema_entities[sn]))
+
 logging.info("Computing schema similarities...")
+
+schema_names = list(schema_names)
+schema_entities = [ schema_entities[sn] for sn in schema_names ]
 
 for n1 in schema_names:
     if n1 not in weights:
@@ -180,13 +190,14 @@ matrix = [ [0]*no_of_schemas for i in xrange(no_of_schemas) ]
 
 def compute_similarity(n1, n2, e1, e2, w):
     return sum([ sum(row) for row in w ])/(len(e1)+len(e2))
+#    return sum([ sum(row) for row in w ])/(len(e1)*len(e2))
 
 max_similarity = 0.0
 for r,n1 in enumerate(schema_names):
     for c,n2 in enumerate(schema_names):
         if c >= r:
             continue
-        this_similarity = compute_similarity(n1, n2, schema_entities[n1], schema_entities[n2],
+        this_similarity = compute_similarity(n1, n2, schema_entities[r], schema_entities[c],
                                              weights[n1][n2])
         matrix[r][c] = this_similarity
         matrix[c][r] = this_similarity
