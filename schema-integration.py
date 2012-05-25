@@ -403,6 +403,11 @@ INFEASIBLE = [ STATUS.infeasible, STATUS.MIP_infeasible, STATUS.MIP_infeasible_o
 logging.debug("The solver status is: %s.", STATUS[c.solution.get_status()])
 logging.debug("Solving method: %s.", cplex.Cplex.solution.method[c.solution.get_method()])
 
+if c.solution.get_status() in INFEASIBLE:
+    logging.warn("!! No clusterization that satisfies the cardinality constraints is possible !!")
+    logging.warn("Given: Min cluster cardinality=%d, Max cluster cardinality=%d",
+                 ll, lu)
+
 if c.solution.get_status() in OPTIMAL:
     logging.info("Optimum found! -- The objective value is %f.",
                  c.solution.get_objective_value())
