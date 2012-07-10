@@ -242,7 +242,7 @@ for r in xrange(no_of_schemas):
     for c in xrange(no_of_schemas):
         matrix[r][c] = matrix[r][c] / max_similarity
 
-if 'similarity_matrix' in args:
+if 'similarity_matrix' in args and args['similarity_matrix'] is not None:
     logging.info("Saving the computed similarity matrix to file '%s'...",
                  args['similarity_matrix'].name)
     print("\n".join([ ",".join([ "{0:.6f}".format(el)
