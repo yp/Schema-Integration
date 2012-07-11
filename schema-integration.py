@@ -118,7 +118,7 @@ if args['verbose'] == 0:
 elif args['verbose'] == 1:
     log_level = logging.DEBUG
 else:
-    log_level = logging.TRACE
+    log_level = logging.DEBUG
 
 
 logging.basicConfig(level=log_level,
@@ -155,7 +155,7 @@ for line in infile:
     if next_is_header:
         # The first cell must be "SCHEMAi VS SCHEMAj"
         header = line[0].strip('"')
-        logging.debug("Read header '%s'...", header)
+        # logging.debug("Read header '%s'...", header)
         assert " VS " in header
         header = header.split(" VS ")
         assert len(header)==2
@@ -251,7 +251,7 @@ if 'similarity_matrix' in args and args['similarity_matrix'] is not None:
           file=args['similarity_matrix'])
 
 matrixplus = matrix
-matrixminus = [ [ -el for el in mrow ] for mrow in matrix ]
+#matrixminus = [ [ -el for el in mrow ] for mrow in matrix ]
 #matrixminus = [ [1]*no_of_schemas for i in xrange(no_of_schemas) ]
 
 n = len(schema_names)
@@ -279,9 +279,9 @@ def lower_triangle_generator(n):
             yield (i1, i2)
 
 class VarType:
-    (X, Y, Empty)= (0, 1, 2)
+    (X, Y, Empty, Xtc)= (0, 1, 2, 3)
 
-def prepare_ILP_variables(k, n, matrixplus, matrixminus):
+def prepare_ILP_variables(k, n, matrixplus):
     logging.info("Preparing ILP variables...")
     variable_list= []
     variable_names= []
@@ -292,11 +292,15 @@ def prepare_ILP_variables(k, n, matrixplus, matrixminus):
         variable_list.extend([ (VarType.X, (i, j, c)) for c in xrange(k) ])
         variable_names.extend([ "X_{i}_{j}_{c}".format(i=i, j=j, c=c)
                                 for c in xrange(k) ])
-        variable_types.extend([ cplex.Cplex.variables.type.binary ] * k)
-        if i<j and j<n:
-            variable_obj.extend([ matrixplus[i][j] - matrixminus[i][j] ] * k)
-        else:
-            variable_obj.extend([ 0.0 ] * k)
+        variable_types.extend([ cplex.Cplex.variables.type.continuous ] * k)
+        variable_obj.extend([ 0.0 ] * k)
+
+    variable_list.extend(( (VarType.Xtc, c)
+                           for c in xrange(k) ))
+    variable_names.extend(( "Xtc_{c}".format(c=c)
+                           for c in xrange(k) ))
+    variable_obj.extend([ 1.0 ] * k)
+    variable_types.extend([ cplex.Cplex.variables.type.continuous ] * k)
 
 # Variables Y (i, c) (with i element and c cluster)
     variable_list.extend(( (VarType.Y, (i, c))
@@ -319,7 +323,7 @@ def prepare_ILP_variables(k, n, matrixplus, matrixminus):
 
     return (variable_names, variable_obj, variable_types, variable_idx)
 
-def prepare_ILP_constraints(k, n, matrixplus, matrixminus,
+def prepare_ILP_constraints(k, n, matrixplus,
                             ll, lu, eu,
                             weights,
                             variable_idx):
@@ -345,21 +349,22 @@ def prepare_ILP_constraints(k, n, matrixplus, matrixminus,
     for i,j in lower_triangle_generator(n):
         for c in xrange(k):
             constr_mat.append( get_constr_coeff( variable_idx,
-                                                 ( 1, (VarType.X, (i, j, c))),
-                                                 (-1, (VarType.Y, (i, c))) ) )
-            constr_sense.append('L')
-            constr_rhs.append(0)
-            constr_mat.append( get_constr_coeff( variable_idx,
-                                                 ( 1, (VarType.X, (i, j, c))),
-                                                 (-1, (VarType.Y, (j, c))) ) )
-            constr_sense.append('L')
-            constr_rhs.append(0)
-            constr_mat.append( get_constr_coeff( variable_idx,
-                                                 ( 1, (VarType.X, (i, j, c))),
-                                                 (-1, (VarType.Y, (i, c))),
-                                                 (-1, (VarType.Y, (j, c))) ) )
+                                                 (matrixplus[i][j], (VarType.Y, (i, c))),
+                                                 (-1, (VarType.X, (i, j, c))) ) )
             constr_sense.append('G')
-            constr_rhs.append(-1)
+            constr_rhs.append(0)
+            constr_mat.append( get_constr_coeff( variable_idx,
+                                                 (matrixplus[i][j], (VarType.Y, (j, c))),
+                                                 (-1, (VarType.X, (i, j, c))) ) )
+            constr_sense.append('G')
+            constr_rhs.append(0)
+
+    for c in xrange(k):
+        constr_mat.append( get_constr_coeff( variable_idx,
+                                             *[(1, (VarType.X, (i, j, c))) for i,j in lower_triangle_generator(n)] +
+                                             [ (-1, (VarType.Xtc, c)) ] ) )
+        constr_sense.append('G')
+        constr_rhs.append(0)
 
     # Maximum cluster cardinality
     for c in xrange(k):
@@ -394,12 +399,31 @@ def prepare_ILP_constraints(k, n, matrixplus, matrixminus,
         constr_sense.append('G')
         constr_rhs.append(ll)
 
-#    for c in xrange(k-1):
-#        constr_mat.append( get_constr_coeff( variable_idx,
-#                                             (1, (VarType.Empty, c+1)),
-#                                             (-1, (VarType.Empty, c)) ) )
-#        constr_sense.append('G')
-#        constr_rhs.append(0)
+    # Set an upper bound on the maximum similarity
+    n_large_clusters = (n / lu)
+    remaining = max(n - (n_large_clusters * lu), ll)
+    logging.debug("There are %d large clusters and a single cluster of %d elements.",
+                  n_large_clusters, remaining)
+    n_elements = (n_large_clusters * (lu*(lu-1)/2)) + (remaining*(remaining-1)/2)
+    logging.debug("Computing the %dth largest similarities...", n_elements)
+    best_simils = sorted(( matrixplus[i][j] for i,j in lower_triangle_generator(n) ),
+                         reverse=True)[:n_elements]
+    logging.info("The objective function cannot be greater than %.3f.", sum(best_simils))
+    constr_mat.append( get_constr_coeff( variable_idx,
+                                         *[ (1, (VarType.X, (i, j, c)))
+                                            for i,j in lower_triangle_generator(n)
+                                            for c in xrange(k) ] ) )
+    constr_sense.append('L')
+    constr_rhs.append(sum(best_simils))
+
+    best_cluster_similarity = sum(best_simils[:(lu*(lu-1)/2)])
+    logging.debug("Each cluster cannot have similarity greater than %.3f.",
+                  best_cluster_similarity)
+    for c in xrange(k):
+        constr_mat.append( get_constr_coeff( variable_idx,
+                                             (1, (VarType.Xtc, c)) ) )
+        constr_sense.append('L')
+        constr_rhs.append(best_cluster_similarity)
 
 
 
@@ -412,7 +436,7 @@ def prepare_ILP_constraints(k, n, matrixplus, matrixminus,
 logging.debug("Computing the set of variables...")
 
 (variable_names, variable_obj,
- variable_types, variable_idx) = prepare_ILP_variables(k, n, matrixplus, matrixminus)
+ variable_types, variable_idx) = prepare_ILP_variables(k, n, matrixplus)
 N_VARS= len(variable_names)
 
 logging.debug("The program has %d variables.", N_VARS)
@@ -420,7 +444,7 @@ logging.debug("The program has %d variables.", N_VARS)
 
 logging.debug("Computing the set of constraints...")
 
-(constr_mat, constr_sense, constr_rhs) = prepare_ILP_constraints(k, n, matrixplus, matrixminus,
+(constr_mat, constr_sense, constr_rhs) = prepare_ILP_constraints(k, n, matrixplus,
                                                                  ll, lu, eu,
                                                                  [ len(se) for se in schema_entities ],
                                                                  variable_idx)
@@ -460,7 +484,8 @@ with LogFile("CPLEX_LOG == ") as lf:
 logging.info("Search process terminated!")
 
 STATUS = cplex.Cplex.solution.status
-OPTIMAL = [ STATUS.optimal, STATUS.MIP_optimal, STATUS.MIP_optimal_relaxed_sum, STATUS.optimal_tolerance ]
+SUBOPTIMAL = [ STATUS.MIP_abort_feasible, STATUS.optimal_tolerance ]
+OPTIMAL = [ STATUS.optimal, STATUS.MIP_optimal, STATUS.MIP_optimal_relaxed_sum ]
 INFEASIBLE = [ STATUS.infeasible, STATUS.MIP_infeasible, STATUS.MIP_infeasible_or_unbounded ]
 logging.debug("The solver status is: %s.", STATUS[c.solution.get_status()])
 logging.debug("Solving method: %s.", cplex.Cplex.solution.method[c.solution.get_method()])
@@ -470,9 +495,13 @@ if c.solution.get_status() in INFEASIBLE:
     logging.warn("Given: Min cluster cardinality=%d, Max cluster cardinality=%d, Max no of entities=%d",
                  ll, lu, eu)
 
-if c.solution.get_status() in OPTIMAL:
-    logging.info("Optimum found! -- The objective value is %f.",
-                 c.solution.get_objective_value())
+if c.solution.get_status() in OPTIMAL or c.solution.get_status() in SUBOPTIMAL:
+    if c.solution.get_status() in OPTIMAL:
+        logging.info("Optimum found! -- The objective value is %f.",
+                     c.solution.get_objective_value())
+    else:
+        logging.info("Solution found BUT IS NOT GUARANTEED TO BE OPTIMAL! -- The objective value is %f.",
+                     c.solution.get_objective_value())
 
     cluster_assignment = collections.defaultdict(list)
     assigned = set()
@@ -482,7 +511,7 @@ if c.solution.get_status() in OPTIMAL:
                 assert i not in assigned
                 cluster_assignment[cl].append(i)
                 assigned.add(i)
-                logging.debug("Schema '%s' is in cluster '%d'.", schema_names[i], cl)
+                # logging.debug("Schema '%s' is in cluster '%d'.", schema_names[i], cl)
 
 #    for var in variable_names:
 #        logging.debug("%.12s= %.5s", var, "True" if c.solution.get_values(var)>0.0 else "False")
@@ -516,7 +545,7 @@ if c.solution.get_status() in OPTIMAL:
     for cl in xrange(k):
         logging.debug("Cluster {0:3d}: {1}empty".format(cl, ""
                                                         if c.solution.get_values(variable_idx[(VarType.Empty, cl)]) > 0
-                                                        else "not"))
+                                                        else "not "))
 
 logging.info("Schema integration via clustering -- Completed")
 
