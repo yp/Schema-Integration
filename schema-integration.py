@@ -260,7 +260,7 @@ lu = args['max_cardinality']
 eu = args['max_entities']
 
 logging.debug("Clusters must have at least %d and at most %d elements.", ll, lu)
-logging.debug("Clusters must have at most %d entitites.", eu)
+logging.debug("Clusters must have at most %d entities.", eu)
 
 # Compute the number 'k' of clusters
 
