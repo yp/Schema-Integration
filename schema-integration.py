@@ -30,9 +30,11 @@ from __future__ import print_function
 
 import argparse
 import collections
+import copy
 import itertools
 import logging
 import math
+import random
 import sys
 
 import cplex
@@ -42,6 +44,8 @@ SUBOPTIMAL = [ STATUS.MIP_abort_feasible, STATUS.optimal_tolerance ]
 OPTIMAL = [ STATUS.optimal, STATUS.MIP_optimal, STATUS.MIP_optimal_relaxed_sum ]
 INFEASIBLE = [ STATUS.infeasible, STATUS.MIP_infeasible, STATUS.MIP_infeasible_or_unbounded ]
 
+# Ensure replicability
+random.seed(26343)
 
 class SolutionStatus:
     INFEASIBLE = 0
@@ -280,7 +284,9 @@ def prepare_ILP_constraints(kr, nr, matrixplus,
         constr_rhs.append(0)
 
     n_large_clusters = (lnr / lu)
-    remaining = max(lnr - (n_large_clusters * lu), ll)
+    remaining = lnr - (n_large_clusters * lu)
+    if 0 < remaining and remaining < ll:
+        remaining = ll
     logging.debug("There are %d large clusters and a single cluster of %d elements.",
                   n_large_clusters, remaining)
     n_elements = (n_large_clusters * (lu*(lu-1)/2)) + (remaining*(remaining-1)/2)
@@ -295,8 +301,8 @@ def prepare_ILP_constraints(kr, nr, matrixplus,
     constr_sense.append('L')
     constr_rhs.append(sum(simils[:n_elements]))
 
-    simils = [x for i,row in enumerate(matrixplus)
-              for x in sorted(row[i:], reverse=True)[:lu]]
+    simils = [x for i,row in [ (el,matrixplus[el]) for el in nr ]
+              for x in sorted([row[j] for j in nr if j < el], reverse=True)[:lu]]
     other_obj_ub = sum(sorted(simils, reverse=True)[:n_elements])
     constr_mat.append( get_constr_coeff( variable_idx,
                                          *[ (1, (VarType.WeightCluster, c))
@@ -317,10 +323,10 @@ def try_to_solve(variable_names, variable_obj, variable_types,
     c = cplex.Cplex()
     with LogFile("CPLEX_LOG == ") as lf:
 
-        c.parameters.threads.set(1)
+        c.parameters.threads.set(2)
         c.parameters.emphasis.memory.set(1)
         c.parameters.emphasis.mip.set(1)
-        c.parameters.parallel.set(1)
+        c.parameters.parallel.set(0)
         c.parameters.mip.strategy.search.set(1)
         c.parameters.mip.strategy.probe.set(3)
 
@@ -383,12 +389,17 @@ def compute_assignment(kr, nr, c, variable_idx):
 def save_assignment(outfile, cluster_assignment):
     logging.info("Saving results to file '%s'...", outfile.name)
     print('"CLUSTER-ID","SCHEMA-ID","SCHEMA-NAME"', file=outfile)
-    for cl,ls in sorted(cluster_assignment.items(),
-                        key=lambda x: x[0]):
+    for cl,ls in enumerate(cluster_assignment):
         for s in ls:
             print('{cl},{sid},"{sname}"'.format(cl=cl, sid=s, sname=schema_names[s]),
                   file=outfile)
 
+def compute_assignment_similarity(assignment, matrixplus):
+    tot = 0.0
+    for cl in assignment:
+        for i,j in lower_triangle_generator(cl):
+            tot = tot + matrixplus[i][j]
+    return tot
 
 
 def compute_solution(matrixplus, k, nr, ll, lu, eu, schema_weights):
@@ -628,14 +639,106 @@ assert 1 <= ll
 assert ll <= lu
 assert ll <= n
 
-k = int(math.ceil(float(n) / ll))
-
 schema_weights = [ len(se) for se in schema_entities ]
 
-(solution_status, solution) = compute_solution(matrixplus, k, range(n), ll, lu, eu, schema_weights)
 
-if solution_status in [SolutionStatus.SUBOPTIMAL, SolutionStatus.OPTIMAL]:
-    save_assignment(outfile, solution.assignment)
+# Try to compute a good starting point
+#  - phase 1: check if schema_weights are too high
+assert sum(sorted(schema_weights, reverse=True)[:ll]) <= eu
+assert n >= 2*lu
+
+#  - phase 2: split the input set
+partition = [ list(range(starting_point, min(starting_point+lu, n)))
+              for starting_point in range(0, n, lu)]
+i = 0
+while len(partition[-1]) < ll:
+    partition[-1].append(partition[i][-1])
+    partition[i] = partition[i][:-1]
+    i = (i + 1) % (len(partition)-1)
+
+if len(partition) % 2 == 1:
+    new_set = []
+    while len(partition[i]) <= ll:
+        i = (i + 1) % len(partition)
+    while len(new_set) < ll:
+        new_set.append(partition[i][-1])
+        partition[i] = partition[i][:-1]
+        i = (i + 1) % len(partition)
+        while len(partition[i]) <= ll:
+            i = (i + 1) % len(partition)
+    partition.append(new_set)
+
+logging.debug("We computed the following element partition:")
+for elset in partition:
+    logging.debug("  * (%d) %s", len(elset), ", ".join([str(el) for el in elset]))
+
+# Solve indipendently for each pair of the partition
+best_cluster_assignment = None
+best_obj = 0.0
+
+max_tries = 2 * lu
+remaining_tries = max_tries
+
+while True:
+    new_cluster_assignment = []
+    prevset = None
+    prevcl = None
+    for elsetid,elset in enumerate(partition):
+        if prevset is None:
+            prevset = elset
+            continue
+        if len(prevset)+len(elset) < lu+ll+max_tries-remaining_tries and elsetid < len(partition)-1:
+            prevset = prevset + elset
+            continue
+        elems = prevset + elset
+        k = int(math.ceil(float(len(elems)) / ll))
+        logging.debug("Solving on (%d) %s using at most %d clusters.",
+                      len(elems), ", ".join([str(el) for el in elems]), k)
+
+        (solution_status, solution) = compute_solution(matrixplus, k, elems, ll, lu, eu, schema_weights)
+
+        assert solution_status in [SolutionStatus.SUBOPTIMAL, SolutionStatus.OPTIMAL]
+
+        solution.assignment = [ solution.assignment[i] for i in range(len(solution.assignment)) ]
+
+        # Get the latest clusters until 2 * ul elements
+        last_elems = 0
+        i = len(solution.assignment) - 1
+        while i > 0 and last_elems + len(solution.assignment[i]) <= lu+ll+max_tries-remaining_tries:
+            last_elems = last_elems + len(solution.assignment[i])
+            i = i - 1
+        # The heaviest cluster are the first ones, save it
+        new_cluster_assignment.extend(solution.assignment[:i+1])
+        # Re-clusterize the others
+        prevcl = solution.assignment[i+1:]
+        prevset = [ el for cluster in prevcl for el in cluster ]
+
+        obj = compute_assignment_similarity(new_cluster_assignment, matrixplus)
+        logging.info("Partial similarity: %.4f", obj)
+
+    new_cluster_assignment.extend(prevcl)
+    obj = compute_assignment_similarity(new_cluster_assignment, matrixplus)
+    logging.info("Total similarity: %.4f", obj)
+
+    if obj > best_obj:
+        logging.info("New clusterization improves the old one (new obj= %.5f, old obj= %.5f)",
+                     obj, best_obj)
+        best_obj = obj
+        best_cluster_assignment = new_cluster_assignment
+        partition = copy.copy(new_cluster_assignment)
+        random.shuffle(partition)
+    else:
+        logging.info("New clusterization does not improve the old one."
+                     "(new obj= %.5f, old obj= %.5f)",
+                     obj, best_obj)
+        remaining_tries = remaining_tries - 1
+        logging.info("Remaining tries: %d", remaining_tries)
+        if remaining_tries <= 0:
+            break
+        random.shuffle(partition)
+
+
+save_assignment(outfile, best_cluster_assignment)
 
 
 logging.info("Schema integration via clustering -- Completed")
