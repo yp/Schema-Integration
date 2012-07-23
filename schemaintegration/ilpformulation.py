@@ -305,3 +305,203 @@ class StrictILPFormulation:
             logging.debug("The solution is feasible.")
 
         return (ss, s)
+
+
+
+
+class LargeILPFormulation:
+
+    class VarType:
+        ClusterAssignment = "Cl"
+        Weight = "W"
+
+    def __init__(self, schemas, constraints):
+        assert schemas
+        assert constraints
+        self._schemas = schemas
+        self._constr = constraints
+        self._solver = None
+        self._elems = None
+        self._k = None
+
+
+    def prepare_ILP(self, ilp_solver, elems=None, k=None):
+        vartype = LargeILPFormulation.VarType
+        assert ilp_solver
+        ## Get all the elements if they are not specified
+        if not elems:
+            elems = list(range(self._schemas.names))
+        ln = len(elems)
+        if not k or k == "auto":
+            k = int(math.ceil(float(ln) / self._constr.ll))
+        kr = list(range(k))
+
+        self._solver = ilp_solver
+        self._elems = elems
+        self._k = k
+
+        logging.info("Solving [%s] with at most %d clusters...",
+                     ", ".join((str(el) for el in self._elems)), self._k)
+
+        self._solver.set_solver_obj(solver.ProblemType.MAXIMIZATION)
+
+        # # # # # # # # # # # # # # #
+        # Prepare the PARAMETERS
+        nprime = self._constr.ll * ( self._k -
+                                     int(math.ceil( float(ln) /
+                                                    self._constr.lu ) ) )
+        add_elems = list(range(-1, -nprime-1, -1))
+        self._add_elems = add_elems
+        all_elems = add_elems + elems
+        ntot = ln + nprime
+
+
+        # # # # # # # # # # # # # # #
+        # Prepare the VARIABLES
+        logging.info("Preparing ILP variables...")
+        # - Variables ClusterAssignment (i, c) (with i true element and c cluster)
+        self._solver.add_variables(
+            variables=[ (vartype.ClusterAssignment, (i, c))
+                        for i in elems
+                        for c in kr ],
+            variable_types=[solver.VariableType.BINARY] * (ln*k),
+            obj_coeff=[ 0.0 ] * (ln*k) )
+
+        # - Variables ClusterAssignment (i, c) (with i "false" element and c cluster)
+        self._solver.add_variables(
+            variables=[ (vartype.ClusterAssignment, (i, c))
+                        for i in add_elems
+                        for c in kr ],
+            variable_types=[solver.VariableType.BINARY] * (nprime*k),
+            obj_coeff=[ 0.0 ] * (nprime*k) )
+
+        # - Variables Weight (i, j, c) (with i, j elements, and c cluster)
+        self._solver.add_variables(
+            variables=[ (vartype.Weight, (i1, i2, c))
+                        for i1, i2 in util.lower_triangle(elems)
+                        for c in kr ],
+            variable_types=[solver.VariableType.CONTINUOUS] * (ln*(ln-1)/2*k),
+            obj_coeff=[ 1.0 ] * (ln*(ln-1)/2*k) )
+
+
+        # # # # # # # # # # # # # # #
+        # Prepare the CONSTRAINTS
+        logging.info("Preparing ILP constraints...")
+        # Each true element is in a single cluster
+        # \sum_k Cl_{i,k} = 1
+        for i in elems:
+            self._solver.add_constraint(
+                lhs=[ (1, (vartype.ClusterAssignment, (i, c))) for c in kr ],
+                sense=solver.ConstraintSense.EQ,
+                rhs=1.0 )
+
+        # Each false element is in at most one single cluster
+        # \sum_k Cl_{i,k} = 1
+        for i in add_elems:
+            self._solver.add_constraint(
+                lhs=[ (1, (vartype.ClusterAssignment, (i, c))) for c in kr ],
+                sense=solver.ConstraintSense.LE,
+                rhs=1.0 )
+
+        # True and false elements are not co-clustered
+        # \sum_k ( Cl_{i,k} + Cl_{j,k} ) \le 1   with i real and j false element
+        for i, j in itertools.product(elems, add_elems):
+            for c in kr:
+                self._solver.add_constraint(
+                    lhs=( [ (1, (vartype.ClusterAssignment, (i, c))),
+                            (1, (vartype.ClusterAssignment, (j, c))) ] ),
+                    sense=solver.ConstraintSense.LE,
+                    rhs=1.0 )
+
+        # W_{i,j,k} \le similarity of i and j if i co-clustered with j
+        for i1,i2 in util.lower_triangle(elems):
+            for c in kr:
+                self._solver.add_constraint(
+                    lhs=[ (self._schemas.similarities[i1][i2],
+                           (vartype.ClusterAssignment, (i1, c))),
+                          (-1, (vartype.Weight, (i1, i2, c))) ],
+                    sense=solver.ConstraintSense.GE,
+                    rhs=0.0 )
+                self._solver.add_constraint(
+                    lhs=[ (self._schemas.similarities[i1][i2],
+                           (vartype.ClusterAssignment, (i2, c))),
+                          (-1, (vartype.Weight, (i1, i2, c))) ],
+                    sense=solver.ConstraintSense.GE,
+                    rhs=0.0 )
+
+        # Maximum cluster cardinality
+        for c in kr:
+            self._solver.add_constraint(
+                lhs=[ (1, (vartype.ClusterAssignment, (i, c)))
+                      for i in all_elems ],
+                sense=solver.ConstraintSense.LE,
+                rhs=self._constr.lu )
+
+        # Maximum number of entities
+        for c in kr:
+            self._solver.add_constraint(
+                lhs=[ (self._schemas.weights[i],
+                       (vartype.ClusterAssignment, (i, c)))
+                      for i in elems ],
+                sense=solver.ConstraintSense.LE,
+                rhs=self._constr.eu )
+
+        # Minimum cluster cardinality
+        for c in kr:
+            self._solver.add_constraint(
+                lhs=[ (1, (vartype.ClusterAssignment, (i, c)))
+                      for i in all_elems ],
+                sense=solver.ConstraintSense.GE,
+                rhs=self._constr.ll )
+
+
+    def get_solution(self):
+        vartype = LargeILPFormulation.VarType
+        assert self._solver
+        solv = self._solver
+        ss = self._solver.get_solution_status()
+        if ss in [solver.SolutionStatus.INFEASIBLE, solver.SolutionStatus.INVALID]:
+            logging.warn("The solver has not a valid solution. Solver status: '%s'", ss)
+            return (ss, None)
+        # Optimal or suboptimal
+        logging.info("The solver computed a *%s* solution.", ss)
+
+        # Get back the solution
+        clusters = [ [ i  for i in self._elems
+                       if solv.get_value((vartype.ClusterAssignment, (i, c))) > 0.0 ]
+                     for c in range(self._k) ]
+        clusters = [ cluster for cluster in clusters if cluster ]
+
+        # Log the solution
+        logging.debug("Computed solution:")
+        for cluster_id,cluster in enumerate(clusters):
+            logging.debug("Cl #%-3d (%3d): %s", cluster_id, len(cluster),
+                          "".join(( "X" if el in cluster else "."
+                                    for el in self._elems )) )
+
+        # Check solution validity
+        in_clusters = [ el for cluster in clusters for el in cluster ]
+        is_valid = ( all(( el in self._elems for el in in_clusters )) and
+                     len(in_clusters) == len(set(in_clusters)) )
+
+        logging.debug("The cluster assignment is %svalid.",
+                      "" if is_valid else "not ")
+
+        if not is_valid:
+            logging.warn("The solution computed by the solver is not valid.")
+            ss = solver.SolutionStatus.INVALID
+            return (ss, None)
+
+        # Build the solution
+        s = solution.Solution(self._schemas, clusters)
+        logging.debug("The solution is %scomplete.",
+                      "" if s.is_complete() else "not ")
+
+        if not self._constr.is_solution_feasible(s):
+            logging.warn("The solution is valid but NOT feasible "
+                         "given the constraints '%s'.", self._constr)
+            ss = solver.SolutionStatus.INVALID
+        else:
+            logging.debug("The solution is feasible.")
+
+        return (ss, s)
