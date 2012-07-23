@@ -106,10 +106,10 @@ class CplexSolver:
         self._c= cplex.Cplex()
         self._c.parameters.threads.set(2)
         self._c.parameters.emphasis.memory.set(1)
-        self._c.parameters.emphasis.mip.set(1)
-        self._c.parameters.parallel.set(0)
-        self._c.parameters.mip.strategy.search.set(1)
-        self._c.parameters.mip.strategy.probe.set(3)
+#        self._c.parameters.emphasis.mip.set(1)
+#        self._c.parameters.parallel.set(1)
+#        self._c.parameters.mip.strategy.search.set(1)
+#        self._c.parameters.mip.strategy.probe.set(3)
 
         self._variable_idx = collections.defaultdict(itertools.count(0).next)
         self._res_status = solver.SolutionStatus.INVALID

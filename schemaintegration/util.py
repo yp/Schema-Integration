@@ -80,7 +80,7 @@ def positive_integer(string):
 
 def fmt_var(variable):
     if type(variable) is tuple:
-        return "_".join([str(part) for part in variable])
+        return "_".join([fmt_var(part) for part in variable])
     else:
         return str(variable)
 

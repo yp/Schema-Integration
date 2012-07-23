@@ -142,7 +142,7 @@ class StrictILPFormulation:
 
         # # # # # # # # # # # # # # #
         # Prepare the CONSTRAINTS
-
+        logging.info("Preparing ILP constraints...")
         # Each element is in a single cluster
         # \sum_k Cl_{i,k} = 1
         for i in elems:
