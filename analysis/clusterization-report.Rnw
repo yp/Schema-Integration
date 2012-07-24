@@ -49,6 +49,7 @@ process.clusterization <- function(schema.similarity.fn, input.filename.row) {
   clusters <- read.csv(input.filename.row$Filename)
   colnames(clusters) <- c("Cluster ID", "Schema ID", "Schema Name", "No. of Entities")
   max.cl.id <- max(clusters$`Cluster ID`)
+  ndig.cl.id <- ceiling(log10(max.cl.id))
   simil <- read.csv(schema.similarity.fn, check.names=FALSE, row.names=1)
   simil <- simil[c(-1),] # remove no. of entities
   #for (i in 1:nrow(simil)) {
@@ -56,14 +57,14 @@ process.clusterization <- function(schema.similarity.fn, input.filename.row) {
   #}
   perm <- match(clusters$`Schema Name`, colnames(simil))
   simil <- simil[perm, perm]
-  colnames(simil) <- paste(clusters$`Cluster ID`, colnames(simil))
-  rownames(simil) <- paste(clusters$`Cluster ID`, rownames(simil))
+  colnames(simil) <- paste(formatC(clusters$`Cluster ID`, width=ndig.cl.id, flag="0"), colnames(simil))
+  rownames(simil) <- paste(formatC(clusters$`Cluster ID`, width=ndig.cl.id, flag="0"), rownames(simil))
   simil.temp <- simil
   simil.temp$`Schema Name 1` <- rownames(simil.temp)
   rownames(simil.temp) <- NULL
   simil.m <- melt(simil.temp, id.vars="Schema Name 1", variable_name="Schema Name 2")
-  simil.m$`Cl.ID.1` <- factor(substr(simil.m$`Schema Name 1`, 1, ceiling(log10(max.cl.id))))
-  simil.m$`Cl.ID.2` <- factor(substr(simil.m$`Schema Name 2`, 1, ceiling(log10(max.cl.id))))
+  simil.m$`Cl.ID.1` <- as.integer(substr(simil.m$`Schema Name 1`, 1, ndig.cl.id))
+  simil.m$`Cl.ID.2` <- as.integer(substr(simil.m$`Schema Name 2`, 1, ndig.cl.id))
   simil.m$`Schema Name 1` <- as.character(simil.m$`Schema Name 1`)
   simil.m$`Schema Name 2` <- as.character(simil.m$`Schema Name 2`)
   simil.cl <- data.table(simil.m)
@@ -78,8 +79,8 @@ process.clusterization <- function(schema.similarity.fn, input.filename.row) {
                            list(`Total Similarity`=sum(Similarity),
                                 `Average Similarity`=mean(Similarity)),
                            by=`Cluster ID`]
-  cluster.data$`Cluster ID` <-
-    as.integer(levels(cluster.data$`Cluster ID`)[cluster.data$`Cluster ID`])
+#  cluster.data$`Cluster ID` <-
+#    as.integer(levels(cluster.data$`Cluster ID`)[cluster.data$`Cluster ID`])
   setkeyv(cluster.data, "Cluster ID")
 
   cluster.entities <- data.table(clusters)[,
