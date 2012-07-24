@@ -28,6 +28,7 @@ options(replace.assign=TRUE,width=90)
 library(xtable)
 library(ggplot2)
 library(data.table)
+library(combinat)
 @
 
 
@@ -104,7 +105,7 @@ process.clusterization <- function(schema.similarity.fn, input.filename.row) {
                                cluster.limits=cluster.limits,
                                simil.m=simil.m)
 }
-@ 
+@
 
 <<def.function.plot.similarities>>=
 plot.clusterization.similarities <- function(s.data) {
@@ -155,7 +156,65 @@ plot.clusterization.similarities <- function(s.data) {
         )
   plot.clusterization.similarities <- p
 }
-@ 
+@
+
+<<comparison-functions>>=
+get.coclustered.pairs <- function(clusters) {
+  pairs <- vector()
+  for (i in unique(clusters$`Cluster ID`)) {
+    curr.cluster <- clusters[clusters$`Cluster ID`==i,]
+    curr.cluster <- curr.cluster[order(curr.cluster$`Schema Name`),]
+    pairs <- c(pairs,
+               combn(curr.cluster$`Schema Name`, 2,
+                     simplify=TRUE,
+                     fun=function(x) { paste(x[1], x[2], sep="&") }))
+  }
+  pairs <- sort(pairs)
+  get.coclustered.pairs <- pairs
+}
+
+compare.clusterization.pair <- function(cl1, cl2) {
+  results <- list()
+  cl1$clusters$`Schema Name` <- as.character(cl1$clusters$`Schema Name`)
+  cl2$clusters$`Schema Name` <- as.character(cl2$clusters$`Schema Name`)
+  results$clustered.pairs.1 <- get.coclustered.pairs(cl1$clusters)
+  results$clustered.pairs.2 <- get.coclustered.pairs(cl2$clusters)
+  results$jaccard.index <- ( length(intersect(results$clustered.pairs.1,
+                                              results$clustered.pairs.2)) /
+                            length(union(results$clustered.pairs.1,
+                                         results$clustered.pairs.2)) )
+  compare.clusterization.pair <- results
+}
+
+compare.all.clusterizations <- function (input.file.names, s.data) {
+  comparison.results <- list()
+  for (b in unique(input.file.names$Bounds)) {
+    case.auto <- input.file.names[input.file.names$Bounds==b &
+                                  input.file.names$Mode=="auto",]
+    case.manual <- input.file.names[input.file.names$Bounds==b &
+                                    input.file.names$Mode=="manual",]
+    for (ia in as.integer(rownames(case.auto))) {
+      for (im in as.integer(rownames(case.manual))) {
+        results <- compare.clusterization.pair(s.data[[ia]],
+                                               s.data[[im]])
+        results$Bounds <- b
+        results$Index.Auto <- ia
+        results$Index.Manual <- im
+        comparison.results[[paste(b, ia, im)]] <- results
+      }
+    }
+  }
+  compare.all.clusterizations <- comparison.results
+}
+@
+
+
+<<compute-similarities>>=
+s.data <- vector("list", nrow(input.file.names))
+for (i in 1:nrow(input.file.names)) {
+  s.data[[i]] <- process.clusterization(schema.similarities, input.file.names[i,])
+}
+@
 
 <<print-input-files, results='asis'>>=
 print(xtable(input.file.names[,c(1,2)],
@@ -166,12 +225,31 @@ print(xtable(input.file.names[,c(1,2)],
 @
 
 
-<<compute-similarities>>=
-s.data <- vector("list", nrow(input.file.names))
-for (i in 1:nrow(input.file.names)) {
-  s.data[[i]] <- process.clusterization(schema.similarities, input.file.names[i,])
+<<print-cluster-comparison-results, results='asis'>>=
+comparison.results <- compare.all.clusterizations(input.file.names, s.data)
+bounds <- vector(mode = "character", length = 0)
+manual.clusterization <- vector(mode = "character", length = 0)
+auto.clusterization <- vector(mode = "character", length = 0)
+jaccard.indexes <- vector(mode = "numeric", length = 0)
+for (i in comparison.results) {
+  bounds <- c(bounds, i$Bounds)
+  manual.clusterization <- c(manual.clusterization,
+                             input.file.names$Filename[i$Index.Manual])
+  auto.clusterization <- c(auto.clusterization,
+                           input.file.names$Filename[i$Index.Auto])
+  jaccard.indexes <- c(jaccard.indexes, i$jaccard.index)
 }
-@ 
+comparison.table <- data.frame(Bounds=bounds,
+                               `Manual Clusterization`=paste("\\small", manual.clusterization),
+                               `Automatic Clusterization`=paste("\\small", auto.clusterization),
+                               `Jaccard Index`=jaccard.indexes,
+                               check.names=FALSE)
+print(xtable(comparison.table,
+             caption="Comparison results", digits=4),
+      sanitize.text.function = function(x){x},
+      include.rownames=FALSE,
+      booktabs=TRUE)
+@
 
 <<plot-similarities, fig.show='asis', fig.cap=paste("Clusterization similarities --", input.file.names$Description)>>=
 for (i in 1:nrow(input.file.names)) {
