@@ -1,0 +1,12 @@
+figure/
+clusterization-report.pdf
+out-clusters-2-6-50.csv
+out-clusters-2-6-inf.csv
+out-messages-2-6-50.log.xz
+out-messages-2-6-inf.log.xz
+out-schema-similarities-2-6-50.csv
+out-schema-similarities-2-6-50.dot
+out-schema-similarities-2-6-inf.csv
+out-schema-similarities-2-6-inf.dot
+schema-similarities.csv
+

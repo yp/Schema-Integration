@@ -1,0 +1,5 @@
+"Filename","Description","Mode","Bounds"
+"manual-clusters-2-6-50.csv","Manual clusterization: $2 \le n_s \le 6$, $n_e \le 50$","manual","$2 \le n_s \le 6$, $n_e \le 50$"
+"manual-clusters-2-6-inf.csv","Manual clusterization: $2 \le n_s \le 6$","manual","$2 \le n_s \le 6$"
+"out-clusters-2-6-50.csv","Automatic clusterization: $2 \le n_s \le 6$, $n_e \le 50$","auto","$2 \le n_s \le 6$, $n_e \le 50$"
+"out-clusters-2-6-inf.csv","Automatic clusterization: $2 \le n_s \le 6$","auto","$2 \le n_s \le 6$"
