@@ -44,6 +44,7 @@ import schemaintegration.ilpformulation
 import schemaintegration.solution
 import schemaintegration.solver
 import schemaintegration.cplexsolver
+import schemaintegration.gurobisolver
 
 # Ensure replicability
 random.seed(26343)
@@ -208,10 +209,11 @@ solution.logme(logging.debug)
 # Solve indipendently for each pair of the partition
 best_solution = None
 
-max_instance_size = constr.lu + constr.lu + constr.ll
+max_instance_size = constr.lu + 2*constr.ll
 
-max_cardinality_increase = constr.lu + constr.lu
-tries_for_cardinality = 5
+max_cardinality_increase = constr.lu + constr.ll
+tries_for_cardinality = int(3*max_cardinality_increase/2)
+
 
 current_try = 0
 current_increase = 0
@@ -228,7 +230,7 @@ while True:
     for elems in gen.generator():
 
         solver = schemaintegration.solver.Solver(
-            schemaintegration.cplexsolver.CplexSolver() )
+            schemaintegration.gurobisolver.GurobiSolver() )
 
         formulation.prepare_ILP(solver, elems, k="auto")
 
@@ -244,7 +246,9 @@ while True:
         good_clusters = len(partial_solution.clusters)
         if gen.can_reuse():
             # Reorder clusters
-            partial_solution.sort_clusters_by_similarity()
+            ## Commented because is not really useful, since the process stucks to some
+            ## local best clusters.
+            # partial_solution.sort_clusters_by_similarity()
 
             # Get the latest clusters until max_instance_size-lu elements
             last_elems = 0
@@ -296,6 +300,7 @@ while True:
             current_try = 0
             current_increase = current_increase + 1
             max_instance_size = max_instance_size + 1
+            tries_for_cardinality = max(1, tries_for_cardinality - 1)
             logging.info("Increasing instance size limit to %d. "
                          "Remaining increases: %d",
                          max_instance_size,
