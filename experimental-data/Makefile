@@ -16,7 +16,7 @@ clusterization:	out-2-6-50 out-2-6-inf
 		false;  \
 	fi
 
-report:	clusterization clusterization-report.pdf
+report:	clusterization clusterization-report.pdf suppl-mat.pdf
 
 .PHONY:	out-2-6-50 out-2-6-inf
 
@@ -52,3 +52,7 @@ clusterization-report.pdf:	analysis/clusterization-report.Rnw clusterizations-to
 	echo 'library("knitr"); opts_knit$$set(root.dir = getwd()); knit2pdf("analysis/clusterization-report.Rnw")' | R --no-save --no-restore ; \
 	rm -f clusterization-report.aux clusterization-report.log clusterization-report.out clusterization-report.tex
 
+suppl-mat.pdf:	analysis/suppl-mat.Rnw clusterizations-to-analyze.csv manual-clusters-2-6-50.csv manual-clusters-2-6-inf.csv out-clusters-2-6-50.csv out-clusters-2-6-inf.csv schema-similarities.csv
+	@echo "Preparing clusterization report..."; \
+	echo 'library("knitr"); opts_knit$$set(root.dir = getwd()); knit2pdf("analysis/suppl-mat.Rnw")' | R --no-save --no-restore ; \
+	rm -f suppl-mat.aux suppl-mat.log suppl-mat.out suppl-mat.tex

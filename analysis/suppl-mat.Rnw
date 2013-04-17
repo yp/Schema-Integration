@@ -1,0 +1,298 @@
+\documentclass[10pt,a4paper]{article}
+%\usepackage[sc]{mathpazo}
+\usepackage[bitstream-charter]{mathdesign}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2cm,bmargin=2.5cm,lmargin=2cm,rmargin=2cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage[unicode=true,pdfusetitle,
+ bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+ breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+ {hyperref}
+\usepackage{booktabs}
+
+<<constants, include=FALSE>>=
+clusterizations.to.analyze <- "clusterizations-to-analyze.csv"
+schema.similarities <- "schema-similarities.csv"
+base.size <- 8
+input.file.names <- read.csv(clusterizations.to.analyze,stringsAsFactors=FALSE)
+@
+
+\begin{document}
+
+<<setup, include=FALSE, cache=FALSE>>=
+opts_chunk$set(fig.path='figure/report-', fig.align='center', fig.show='hold',
+               tidy=FALSE, size="small", dev="tikz", dpi=100, echo=FALSE, cache=FALSE)
+options(replace.assign=TRUE,width=90)
+library(xtable)
+library(ggplot2)
+library(data.table)
+library(combinat)
+library(reshape)
+@
+
+
+
+\title{A Clustering Algorithm for Planning the Integration Process of a
+  Large Number of Conceptual Schemas\\--\\Supplementary information}
+
+
+\author{Carlo Batini \and
+  Paola Bonizzoni \and
+  Marco Comerio \and
+  Riccardo Dondi \and Yuri Pirola
+  \and Francesco Salandra}
+
+\date{April 2013}
+
+\maketitle
+
+This report analyzes several characteristics of four different
+clusterizations of 36 conceptual schemas of the Italian Fiscal
+Information System.
+Two clusterizations are performed by a domain expert,
+while the other twos are obtained with our novel constrained correlation
+clustering algorithm.
+All the clusterizations satisfy the constraint that each cluster must
+contain at least $l_L=2$ schemas and at most $l_U=6$ schemas.
+One clusterization performed by the domain expert and one clusterization
+obtained with the algorithm satisfy the additional constraints that the
+total number of entities is at most $l_E=50$.
+The four labels \emph{Manual 2-6-50}, \emph{Manual 2-6-$\infty$},
+\emph{Algo 2-6-50}, and \emph{Algo 2-6-$\infty$} identify the four
+different clusterizations.
+
+Tables \ref{comp:1}, \ref{comp:2}, \ref{comp:3}, and \ref{comp:4}
+provide the composition of each cluster (identified by a numeric
+identifier), while Tables \ref{charact:1}, \ref{charact:2},
+\ref{charact:3}, and \ref{charact:4} report some descriptive statistics
+of the clusters, as the number of schemas composing them, the total
+number of entities, their average similarity, and their total
+similarity.
+
+Figures \ref{fig:plot-similarities1}--\ref{fig:plot-similarities4}
+visually represent the similarity among the schemas (with a color scale,
+from white, which represents similarity equal to $0.0$, to black, which
+represents similarity equal to $1.0$).
+Moreover, square boxes ``delimit'' the clusters, highlighting their inner
+similarity.
+The total similarity of each cluster is indicated with a label on the
+main diagonal.
+
+
+
+<<def.function.process.clusterization>>=
+process.clusterization <- function(schema.similarity.fn, input.filename.row) {
+  clusters <- read.csv(input.filename.row$Filename)
+  colnames(clusters) <- c("Cluster ID", "Schema ID", "Schema Name", "No. of Entities")
+  max.cl.id <- max(clusters$`Cluster ID`)
+  ndig.cl.id <- ceiling(log10(max.cl.id))
+  simil <- read.csv(schema.similarity.fn, check.names=FALSE, row.names=1)
+  simil <- simil[c(-1),] # remove no. of entities
+  #for (i in 1:nrow(simil)) {
+  #  simil[i, i] <- 1.0
+  #}
+  perm <- match(clusters$`Schema Name`, colnames(simil))
+  simil <- simil[perm, perm]
+  colnames(simil) <- paste(formatC(clusters$`Cluster ID`, width=ndig.cl.id, flag="0"), colnames(simil))
+  rownames(simil) <- paste(formatC(clusters$`Cluster ID`, width=ndig.cl.id, flag="0"), rownames(simil))
+  simil.temp <- simil
+  simil.temp$`Schema Name 1` <- rownames(simil.temp)
+  rownames(simil.temp) <- NULL
+  simil.m <- melt(simil.temp, id.vars="Schema Name 1", variable_name="Schema Name 2")
+  simil.m$`Cl.ID.1` <- as.integer(substr(simil.m$`Schema Name 1`, 1, ndig.cl.id))
+  simil.m$`Cl.ID.2` <- as.integer(substr(simil.m$`Schema Name 2`, 1, ndig.cl.id))
+  simil.m$`Schema Name 1` <- as.character(simil.m$`Schema Name 1`)
+  simil.m$`Schema Name 2` <- as.character(simil.m$`Schema Name 2`)
+  simil.cl <- data.table(simil.m)
+  simil.cl$`Schema Name 1` <- as.character(simil.cl$`Schema Name 1`)
+  simil.cl$`Schema Name 2` <- as.character(simil.cl$`Schema Name 2`)
+  simil.cl <- simil.cl[Cl.ID.1==Cl.ID.2 & `Schema Name 1`<`Schema Name 2`,]
+  simil.cl <- simil.cl[,list(`Cluster ID`=Cl.ID.1,
+                             `Schema Name 1`=`Schema Name 1`,
+                             `Schema Name 2`=`Schema Name 2`,
+                             `Similarity`=value)]
+  cluster.data <- simil.cl[,
+                           list(`Total Similarity`=sum(Similarity),
+                                `Average Similarity`=mean(Similarity)),
+                           by=`Cluster ID`]
+#  cluster.data$`Cluster ID` <-
+#    as.integer(levels(cluster.data$`Cluster ID`)[cluster.data$`Cluster ID`])
+  setkeyv(cluster.data, "Cluster ID")
+
+  cluster.entities <- data.table(clusters)[,
+                                           list(`No. of Entities`=sum(`No. of Entities`),
+                                                `No. of Schemas`=.N),
+                                           by=`Cluster ID`]
+  setkeyv(cluster.entities, "Cluster ID")
+
+  cluster.data <- cluster.data[cluster.entities]
+
+  class(cluster.data) <- "data.frame"
+  colnames(cluster.data) <- c("Cluster ID",
+                              "Total Similarity",
+                              "Average Similarity",
+                              "No. of Entities",
+                              "No. of Schemas")
+  cluster.data <- cluster.data[,c(1,5,4,3,2)]
+  cluster.limits <- cumsum(cluster.data$`No. of Schemas`)
+  process.similarities <- list(clusters=clusters,
+                               cluster.data=cluster.data,
+                               cluster.limits=cluster.limits,
+                               simil.m=simil.m)
+}
+@
+
+<<def.function.plot.similarities>>=
+plot.clusterization.similarities <- function(s.data) {
+  simil.m <- s.data[["simil.m"]]
+  cluster.data <- s.data[["cluster.data"]]
+  cluster.limits <- s.data[["cluster.limits"]]
+  p <- (  ggplot(simil.m, aes(`Schema Name 1`, `Schema Name 2`))
+        + geom_tile(aes(fill=value))
+        + scale_fill_gradient(low = "white", high="black")
+        )
+  p <- (  p
+        + theme_grey(base_size = base.size)
+        + labs(x = "", y = "")
+        + scale_x_discrete(expand = c(0, 0))
+        + scale_y_discrete(expand = c(0, 0))
+        + theme(legend.position = "none",
+                axis.ticks = element_blank(),
+                axis.text.x = element_text(
+                  size = base.size * 0.8,
+                  angle = -90, hjust = 0,
+                  colour = "grey20"),
+                axis.text.y = element_text(
+                  size = base.size * 0.8,
+                  angle = 0, hjust = 0,
+                  colour = "grey20"),
+                complete = FALSE
+                )
+        )
+  cluster.limits.prev <- c(0, cluster.limits[1:length(cluster.limits)-1])
+  cluster.limits.coords <- data.frame(clc=c(0, cluster.limits))
+  cluster.centers <- data.frame(clc=((cluster.limits + cluster.limits.prev) / 2),
+                                lab=format(cluster.data$`Total Similarity`, digits=3))
+  limits.colour <- "gray50"
+  text.colour <- "gray20"
+  p <- (  p
+        + geom_step(data=cluster.limits.coords,
+                    aes(x=clc+0.5,y=clc+0.5),
+                    colour=limits.colour, direction="hv")
+        + geom_step(data=cluster.limits.coords,
+                    aes(x=clc+0.5,y=clc+0.5),
+                    colour=limits.colour, direction="vh")
+        )
+  p <- (  p
+        + geom_text(data=cluster.centers,
+                    aes(x=clc+0.5,
+                        y=clc+0.5,
+                        label=lab),
+                    size=3.5, colour=text.colour, angle=45)
+        )
+  plot.clusterization.similarities <- p
+}
+@
+
+<<comparison-functions>>=
+get.coclustered.pairs <- function(clusters) {
+  pairs <- vector()
+  for (i in unique(clusters$`Cluster ID`)) {
+    curr.cluster <- clusters[clusters$`Cluster ID`==i,]
+    curr.cluster <- curr.cluster[order(curr.cluster$`Schema Name`),]
+    pairs <- c(pairs,
+               combn(curr.cluster$`Schema Name`, 2,
+                     simplify=TRUE,
+                     fun=function(x) { paste(x[1], x[2], sep="&") }))
+  }
+  pairs <- sort(pairs)
+  get.coclustered.pairs <- pairs
+}
+
+compare.clusterization.pair <- function(cl1, cl2) {
+  results <- list()
+  cl1$clusters$`Schema Name` <- as.character(cl1$clusters$`Schema Name`)
+  cl2$clusters$`Schema Name` <- as.character(cl2$clusters$`Schema Name`)
+  results$clustered.pairs.1 <- get.coclustered.pairs(cl1$clusters)
+  results$clustered.pairs.2 <- get.coclustered.pairs(cl2$clusters)
+  results$jaccard.index <- ( length(intersect(results$clustered.pairs.1,
+                                              results$clustered.pairs.2)) /
+                            length(union(results$clustered.pairs.1,
+                                         results$clustered.pairs.2)) )
+  compare.clusterization.pair <- results
+}
+
+compare.all.clusterizations <- function (input.file.names, s.data) {
+  comparison.results <- list()
+  for (b in unique(input.file.names$Bounds)) {
+    case.auto <- input.file.names[input.file.names$Bounds==b &
+                                  input.file.names$Mode=="auto",]
+    case.manual <- input.file.names[input.file.names$Bounds==b &
+                                    input.file.names$Mode=="manual",]
+    for (ia in as.integer(rownames(case.auto))) {
+      for (im in as.integer(rownames(case.manual))) {
+        results <- compare.clusterization.pair(s.data[[ia]],
+                                               s.data[[im]])
+        results$Bounds <- b
+        results$Index.Auto <- ia
+        results$Index.Manual <- im
+        comparison.results[[paste(b, ia, im)]] <- results
+      }
+    }
+  }
+  compare.all.clusterizations <- comparison.results
+}
+@
+
+
+<<compute-similarities>>=
+s.data <- vector("list", nrow(input.file.names))
+for (i in 1:nrow(input.file.names)) {
+  s.data[[i]] <- process.clusterization(schema.similarities, input.file.names[i,])
+}
+@
+
+
+<<print-cluster-compositions, results='asis'>>=
+for (i in 1:nrow(input.file.names)) {
+  print(xtable(s.data[[i]]$clusters[,c(1,3,4)],
+               caption=paste("Composition of the clusters --",
+                 input.file.names$Description[i]),
+               label=paste("comp", i, sep=":")),
+        hline.after=c(-1,0,s.data[[i]]$cluster.limits),
+        include.rownames=FALSE)
+  cluster.data <- s.data[[i]]$cluster.data
+  cluster.data <- rbind(cluster.data,
+                        data.frame(`Cluster ID`="Total",
+                                   `No. of Schemas`=sum(cluster.data$`No. of Schemas`),
+                                   `No. of Entities`=sum(cluster.data$`No. of Entities`),
+                                   `Average Similarity`=NA,
+                                   `Total Similarity`=sum(cluster.data$`Total Similarity`),
+                                   check.names=FALSE)
+                        )
+  print(xtable(cluster.data,
+               digits=4,
+               caption=paste("Characteristics of the clusters  --",
+                 input.file.names$Description[i]),
+               label=paste("charact", i, sep=":")),
+        hline.after=c(-1,0,nrow(cluster.data)-1,nrow(cluster.data)),
+        include.rownames=FALSE, floating=TRUE)
+}
+@
+
+\clearpage
+
+<<plot-similarities, fig.show='asis', fig.cap=paste("Clusterization similarities --", input.file.names$Description)>>=
+for (i in 1:nrow(input.file.names)) {
+  p <- plot.clusterization.similarities(s.data[[i]])
+  print(p)
+}
+@
+
+
+\end{document}
+
+%%  LocalWords:  clusterization schemas clusterizations
