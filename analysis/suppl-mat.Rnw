@@ -45,7 +45,6 @@ library(reshape)
   Riccardo Dondi \and Yuri Pirola
   \and Francesco Salandra}
 
-\date{April 2013}
 
 \maketitle
 
